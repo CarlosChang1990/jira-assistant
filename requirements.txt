@@ -1,0 +1,10 @@
+jira
+mattermostautodriver
+langchain
+langchain-community
+langchain-core
+langchain-google-genai
+pydantic
+python-dotenv
+mock
+importlib-metadata

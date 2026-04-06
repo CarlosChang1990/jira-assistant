@@ -1,0 +1,14 @@
+# Exclude files not needed for build
+.git
+.env
+__pycache__
+*.pyc
+*.pyo
+venv/
+.DS_Store
+.gemini/
+.vscode/
+.idea/
+
+# Include users.json (DO NOT exclude - needed for user resolution)
+# Note: This file was previously excluded via .gitignore
