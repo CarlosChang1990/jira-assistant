@@ -311,12 +311,58 @@ Jira Component: "短租(SR)"
 
 ## 🔧 工具腳本
 
-### 使用者同步
+### 使用者同步 (users.json 更新)
+
+> **何時需要執行：** 每次有新成員加入團隊（Jira / Mattermost）時，請依序執行以下步驟。
+
+#### Step 1｜從 Jira API 同步帳號（必做）
 
 ```bash
-# 從 Jira 自動同步所有使用者至 users.json
 python3 utils/sync_users.py
 ```
+
+- 從 Jira 拉取所有啟用中的 `atlassian` 帳號
+- **自動合併**：新成員直接加入，現有暱稱不覆蓋
+- **自動清理**：移除已停用或 Bot 帳號
+
+#### Step 2｜從 Jira Admin Excel 補充資料（可選）
+
+> 適用：當 Step 1 抓到的 display name 不夠完整，或需要確認 email 對應時。
+
+1. 前往 Jira Admin → User Management → 匯出使用者清單為 `jira_user_list.xlsx`
+2. 將檔案放到專案根目錄（覆蓋舊檔）
+3. 執行：
+
+```bash
+python3 utils/import_jira_excel.py
+```
+
+#### Step 3｜從 Mattermost 補充 username / nickname（必做）
+
+```bash
+python3 utils/import_mm_names.py
+```
+
+- 抓取 Mattermost 所有使用者的 `username`、`nickname`、`first_name`、`last_name`
+- 用 **email** 對應到 Jira 帳號後合併進 `users.json`
+- 完成後會顯示「無法匹配」清單（MM 有但 Jira 沒有的帳號，通常是非開發人員）
+
+#### 完整執行範例
+
+```bash
+# 進入虛擬環境
+source .venv/bin/activate
+
+# Step 1: 從 Jira 同步
+python3 utils/sync_users.py
+
+# Step 3: 補充 Mattermost 暱稱
+python3 utils/import_mm_names.py
+```
+
+> 💡 Step 2（Excel 匯入）為選做，Step 1 + Step 3 即可涵蓋大部分情況。
+
+---
 
 ### 版本自動發布
 
@@ -368,7 +414,7 @@ python3 utils/list_models.py        # 列出可用的 Gemini 模型
 2. **前一版本必須存在** — 若目標日期前無任何版本，將建立初始版 `1.0.0(YYMMDD)`
 3. **系統前綴取自 Unreleased 版本** — 只列出尚未發布版本的系統前綴
 4. **DM Only** — Mattermost Bot 僅回應 1-on-1 私訊，忽略群組頻道
-5. **定期同步 users.json** — 新成員加入團隊後需執行 `sync_users.py`
+5. **定期同步 users.json** — 新成員加入團隊後依序執行 `sync_users.py` → `import_mm_names.py`（詳見[使用者同步](#使用者同步-usersjson-更新)）
 6. **對話狀態獨立** — 每個 Channel / Session 獨立維護對話歷史（最多保留 30 則）
 
 ---

@@ -29,6 +29,7 @@ CLOUD_RUN_REGION = os.getenv("CLOUD_RUN_REGION", "")
 
 # Google AI 設定
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
+GOOGLE_MODEL_NAME = os.getenv("GOOGLE_MODEL_NAME", "gemini-2.5-flash")
 
 # 機器人設定
 BOT_NAME = os.getenv("BOT_NAME", "JiraBot")

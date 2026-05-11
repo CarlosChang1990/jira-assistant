@@ -14,7 +14,7 @@ class LLMService:
     def __init__(self):
         if config.GOOGLE_API_KEY:
             self.llm = ChatGoogleGenerativeAI(
-                google_api_key=config.GOOGLE_API_KEY, model="gemini-2.5-flash", temperature=0
+                google_api_key=config.GOOGLE_API_KEY, model=config.GOOGLE_MODEL_NAME, temperature=0
             )
         else:
             self.llm = None
