@@ -68,42 +68,36 @@ echo ""
 echo -e "${YELLOW}🔨 Building and pushing container image...${NC}"
 gcloud builds submit --tag "$IMAGE_REPO" --project "$PROJECT_ID" .
 
-# Prepare Startup Script
+# Prepare container env file
+# This VM runs the container via the COS container runtime (konlet), which reads
+# its image + env from the `gce-container-declaration` metadata. We therefore push
+# the env through `update-container` / `create-with-container` rather than a custom
+# startup-script (the old approach updated startup-script, which konlet ignores, so
+# env changes such as a rotated JIRA_API_TOKEN never reached the running container).
 echo ""
-echo -e "${YELLOW}� Generating startup script...${NC}"
+echo -e "${YELLOW}📋 Generating container env file...${NC}"
 
-STARTUP_SCRIPT="startup-script.sh"
+ENV_FILE="container-env.tmp"
+: > "$ENV_FILE"
 
-# Create startup script locally
-cat > "$STARTUP_SCRIPT" <<EOF
-#!/bin/bash
-set -e
+while IFS='=' read -r key value || [ -n "$key" ]; do
+    # Skip empty lines and comments
+    [[ -z "$key" || "$key" =~ ^# ]] && continue
 
-# Write .env file to /tmp/.env
-cat > /tmp/.env <<ENV_EOF
-$(cat .env)
-ENV_EOF
+    # Strip inline comments
+    value="${value%%#*}"
 
-# Authenticate Docker (COS behavior)
-docker-credential-gcr configure-docker
+    # Trim trailing whitespace
+    value="${value%"${value##*[![:space:]]}"}"
 
-# Pull latest image
-echo "Pulling image: $IMAGE_REPO"
-docker pull "$IMAGE_REPO"
+    # Clean quotes
+    value="${value%\"}"
+    value="${value#\"}"
+    value="${value%\'}"
+    value="${value#\'}"
 
-# Stop and remove existing container if running
-echo "Stopping old container..."
-docker stop jira-bot || true
-docker rm jira-bot || true
-
-# Run new container
-echo "Starting new container..."
-docker run -d \\
-  --name jira-bot \\
-  --restart always \\
-  --env-file /tmp/.env \\
-  "$IMAGE_REPO"
-EOF
+    echo "${key}=${value}" >> "$ENV_FILE"
+done < .env
 
 # Deploy to VM
 echo ""
@@ -111,47 +105,37 @@ echo -e "${YELLOW}📦 Deploying to VM: $VM_NAME ($ZONE)...${NC}"
 
 # Check if VM exists
 if gcloud compute instances describe "$VM_NAME" --zone "$ZONE" --project "$PROJECT_ID" >/dev/null 2>&1; then
-    echo "VM exists. Updating metadata..."
-    
-    # Update startup-script metadata
-    gcloud compute instances add-metadata "$VM_NAME" \
-        --metadata-from-file startup-script="$STARTUP_SCRIPT" \
-        --zone "$ZONE" \
-        --project "$PROJECT_ID"
-        
-    # Check VM status to decide reset vs start
-    VM_STATUS=$(gcloud compute instances describe "$VM_NAME" \
+    echo "VM exists. Updating container declaration (image + env)..."
+
+    # Updating the container declaration restarts the container automatically.
+    gcloud compute instances update-container "$VM_NAME" \
         --zone "$ZONE" \
         --project "$PROJECT_ID" \
-        --format="value(status)")
-    
-    if [ "$VM_STATUS" = "RUNNING" ]; then
-        echo "VM is running. Resetting to apply changes..."
-        gcloud compute instances reset "$VM_NAME" \
-            --zone "$ZONE" \
-            --project "$PROJECT_ID"
-    else
-        echo "VM is stopped ($VM_STATUS). Starting VM..."
-        gcloud compute instances start "$VM_NAME" \
-            --zone "$ZONE" \
-            --project "$PROJECT_ID"
-    fi
+        --container-image "$IMAGE_REPO" \
+        --container-env-file "$ENV_FILE"
+
+    # Remove any stale startup-script from the previous deploy mechanism so it
+    # cannot spin up a second, duplicate container alongside konlet's.
+    gcloud compute instances remove-metadata "$VM_NAME" \
+        --keys startup-script \
+        --zone "$ZONE" \
+        --project "$PROJECT_ID" 2>/dev/null || true
 else
-    echo "VM does not exist. Creating new VM..."
-    gcloud compute instances create "$VM_NAME" \
+    echo "VM does not exist. Creating new VM with container..."
+    gcloud compute instances create-with-container "$VM_NAME" \
         --project "$PROJECT_ID" \
         --zone "$ZONE" \
         --machine-type e2-micro \
-        --image-family cos-stable \
-        --image-project cos-cloud \
         --boot-disk-size 30GB \
         --boot-disk-type pd-standard \
-        --metadata-from-file startup-script="$STARTUP_SCRIPT" \
+        --container-image "$IMAGE_REPO" \
+        --container-env-file "$ENV_FILE" \
+        --container-restart-policy always \
         --tags http-server,https-server
 fi
 
-# Cleanup local startup script
-rm "$STARTUP_SCRIPT"
+# Cleanup local env file
+rm "$ENV_FILE"
 
 echo ""
-echo -e "${GREEN}✅ Deployment complete! VM is rebooting/starting.${NC}"
+echo -e "${GREEN}✅ Deployment complete! Container updated with latest image and env.${NC}"
